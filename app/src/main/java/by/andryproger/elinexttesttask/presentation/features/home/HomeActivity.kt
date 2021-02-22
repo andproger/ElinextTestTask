@@ -72,18 +72,18 @@ class HomeActivity : AppCompatActivity() {
                 }
             })
 
-            scrollToEnd.observe(owner, Observer { scrollToPos ->
+            scrollToEndEvent.observe(owner, Observer { scrollToPos ->
                 scrollToPos?.let {
                     recyclerView.smoothScrollToPosition(adapter.itemCount - 1)
-                    scrollToEnd.value = null
+                    scrollToEndEvent.value = null
                 }
             })
 
-            error.observe(owner, Observer { errorState ->
+            errorEvent.observe(owner, Observer { errorState ->
                 errorState?.let { e ->
                     if (!e.shown) {
                         Toast.makeText(owner, errorState.message, Toast.LENGTH_SHORT).show()
-                        error.value = ErrorState(errorState.message, true)
+                        errorEvent.value = ErrorState(errorState.message, true)
                     }
                 }
             })

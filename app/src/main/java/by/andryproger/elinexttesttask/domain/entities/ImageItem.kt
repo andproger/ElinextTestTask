@@ -1,10 +1,9 @@
-package by.andryproger.elinexttesttask.presentation.features.home
+package by.andryproger.elinexttesttask.domain.entities
 
-data class ImageState(
+class ImageItem(
     val itemId: Long,
-    val link: String?
+    val link: String
 ) {
-
     companion object {
         private var lastId = 1L
 

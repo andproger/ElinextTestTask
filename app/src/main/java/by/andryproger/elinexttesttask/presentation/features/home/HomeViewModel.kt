@@ -4,16 +4,22 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import by.andryproger.elinexttesttask.domain.usecases.GetRandomImagesUseCase
+import by.andryproger.elinexttesttask.domain.gateways.repository.ItemsRepository
+import by.andryproger.elinexttesttask.domain.usecases.AddNewItemUseCase
+import by.andryproger.elinexttesttask.domain.usecases.ReloadItemsUseCase
+import by.andryproger.elinexttesttask.domain.usecases.ReloadItemsUseCaseImpl.Companion.RELOAD_COUNT
 import by.andryproger.elinexttesttask.domain.usecases.RequestResult
 import by.andryproger.elinexttesttask.presentation.di.Injector
 import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
 import io.reactivex.disposables.Disposables
 import io.reactivex.schedulers.Schedulers
 import javax.inject.Inject
 
 class MainViewModel(
-    private val getRandomImagesUseCase: GetRandomImagesUseCase
+    private val addNewItemUseCase: AddNewItemUseCase,
+    private val reloadItemsUseCase: ReloadItemsUseCase,
+    private val itemsRepository: ItemsRepository
 ) : ViewModel() {
 
     val modelSources: ModelSources = ModelSourcesImpl(
@@ -24,51 +30,91 @@ class MainViewModel(
     private val mutableModelSources = modelSources as ModelSourcesImpl
     private val items = mutableModelSources.items
     private val loading = mutableModelSources.loading
-    private val scrollToEnd = mutableModelSources.scrollToEnd
-    private val error = mutableModelSources.error
+
+    private val scrollToEndEvent = mutableModelSources.scrollToEndEvent
+    private val errorEvent = mutableModelSources.errorEvent
 
     private var loadingDisposable = Disposables.disposed()
+    private var compositeDisposable = CompositeDisposable()
 
     init {
+        subscribeToItemsUpdates()
         reloadAll()
+    }
+
+    private fun subscribeToItemsUpdates() {
+        itemsRepository.getWithUpdates()
+            .subscribeOn(Schedulers.io())
+            .observeOn(AndroidSchedulers.mainThread())
+            .subscribe { imageItems ->
+                mutateItems {
+                    imageItems.forEachIndexed { index, imageItem ->
+                        if (getOrNull(index) != null) {
+                            set(index, ImageState(imageItem.itemId, imageItem.link))
+                        } else {
+                            add(ImageState(imageItem.itemId, imageItem.link))
+                        }
+                    }
+                }
+            }.let(compositeDisposable::add)
+    }
+
+    private fun mutateItems(mutate: MutableList<ImageState>.() -> Unit) {
+        items.value = items.value?.toMutableList()?.apply { mutate() }
     }
 
     private fun addNewOne() {
         if (loadingDisposable.isDisposed) {
             val newItem = emptyItems(1).first()
-            items.value = items.value?.toMutableList()?.apply { add(newItem) }
+            mutateItems { add(newItem) }
 
-            items.value?.indexOfFirst { it.itemId == newItem.itemId }?.let { indexOfNew ->
-                loadImages(1) { link ->
-                    items.value = items.value?.toMutableList()?.apply {
-                        set(indexOfNew, ImageState(newItem.itemId, link))
-                    }
-                    scrollToEnd()
+            loadingDisposable = addNewItemUseCase.add()
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .doOnSubscribe {
+                    loading.value = true
+                    errorEvent.value = null
                 }
-            }
+                .doFinally {
+                    loading.value = false
+                }.subscribe { result ->
+                    items.value?.indexOfFirst { it.itemId == newItem.itemId }
+                        ?.let { indexOfNew ->
+                            when (result) {
+                                is RequestResult.Success -> scrollToEnd()
+                                is RequestResult.Error -> {
+                                    onError(result.e)
+                                    mutateItems { removeAt(indexOfNew) }
+                                }
+                            }
+                        }
+                }
         }
     }
 
     private fun reloadAll() {
         if (loadingDisposable.isDisposed) {
-            val newItems = emptyItems(RELOAD_COUNT)
-            items.value = newItems
+            items.value = emptyItems(RELOAD_COUNT)
 
-            loadImages(RELOAD_COUNT) { link ->
-                val indexOfEmpty = newItems.indexOfFirst { it.link == null }
-
-                if (indexOfEmpty >= 0) {
-                    newItems[indexOfEmpty] = ImageState(newItems[indexOfEmpty].itemId, link)
-                } else {
-                    newItems.add(ImageState(ImageState.generateId(), link))
+            loadingDisposable = reloadItemsUseCase.reload()
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .doOnSubscribe {
+                    loading.value = true
+                    errorEvent.value = null
                 }
-                items.value = newItems
-            }
+                .doFinally {
+                    loading.value = false
+                }.subscribe { result ->
+                    when (result) {
+                        is RequestResult.Error -> onError(result.e)
+                    }
+                }
         }
     }
 
     private fun scrollToEnd() {
-        scrollToEnd.value = true
+        scrollToEndEvent.value = true
     }
 
     private fun emptyItems(count: Int): MutableList<ImageState> {
@@ -79,36 +125,15 @@ class MainViewModel(
         }
     }
 
-    private fun loadImages(count: Int, onResult: (String) -> Unit) {
-        loadingDisposable = getRandomImagesUseCase.getByOne(count)
-            .subscribeOn(Schedulers.io())
-            .observeOn(AndroidSchedulers.mainThread())
-            .doOnSubscribe {
-                loading.value = true
-                error.value = null
-            }
-            .doFinally {
-                loading.value = false
-            }
-            .subscribe { result ->
-                when (result) {
-                    is RequestResult.Success -> onResult(result.value)
-                    is RequestResult.Error -> {
-                        if (error.value?.shown != true) {
-                            error.value = ErrorState("Error:${result.e.message}", false)
-                        }
-                    }
-                }
-            }
+    private fun onError(error: Throwable) {
+        if (errorEvent.value?.shown != true) {
+            errorEvent.value = ErrorState("Error:${error.message}", false)
+        }
     }
 
     override fun onCleared() {
         loadingDisposable.dispose()
         super.onCleared()
-    }
-
-    companion object {
-        const val RELOAD_COUNT = 140
     }
 }
 
@@ -119,8 +144,8 @@ interface ModelSources {
     val items: LiveData<List<ImageState>>
     val loading: LiveData<Boolean>
 
-    val scrollToEnd: MutableLiveData<Boolean?>
-    val error: MutableLiveData<ErrorState?>
+    val scrollToEndEvent: MutableLiveData<Boolean?>
+    val errorEvent: MutableLiveData<ErrorState?>
 }
 
 class ModelSourcesImpl(
@@ -131,8 +156,8 @@ class ModelSourcesImpl(
     override val items: MutableLiveData<List<ImageState>> = MutableLiveData()
     override val loading: MutableLiveData<Boolean> = MutableLiveData(false)
 
-    override val scrollToEnd: MutableLiveData<Boolean?> = MutableLiveData()
-    override val error: MutableLiveData<ErrorState?> = MutableLiveData()
+    override val scrollToEndEvent: MutableLiveData<Boolean?> = MutableLiveData()
+    override val errorEvent: MutableLiveData<ErrorState?> = MutableLiveData()
 
     override fun addNewOne() {
         addNewOneImpl()
@@ -146,7 +171,13 @@ class ModelSourcesImpl(
 class HomeVMFactory : ViewModelProvider.Factory {
 
     @Inject
-    lateinit var getRandomImagesUseCase: GetRandomImagesUseCase
+    lateinit var addNewItemUseCase: AddNewItemUseCase
+
+    @Inject
+    lateinit var reloadItemsUseCase: ReloadItemsUseCase
+
+    @Inject
+    lateinit var itemsRepository: ItemsRepository
 
     init {
         Injector.component.inject(this)
@@ -156,7 +187,9 @@ class HomeVMFactory : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
 
         return MainViewModel(
-            getRandomImagesUseCase
+            addNewItemUseCase,
+            reloadItemsUseCase,
+            itemsRepository
         ) as T
     }
 }

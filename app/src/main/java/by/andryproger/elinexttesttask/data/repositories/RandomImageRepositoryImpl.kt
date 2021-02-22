@@ -1,4 +1,4 @@
-package by.andryproger.elinexttesttask.data.network
+package by.andryproger.elinexttesttask.data.repositories
 
 import by.andryproger.elinexttesttask.domain.gateways.repository.RandomImageRepository
 import okhttp3.*
