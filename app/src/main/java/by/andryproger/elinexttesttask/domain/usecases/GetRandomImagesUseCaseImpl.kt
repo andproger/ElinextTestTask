@@ -14,7 +14,7 @@ class GetRandomImagesUseCaseImpl(
 
             @Synchronized
             fun onResult(link: String?, error: Throwable?) {
-                val item = error?.let { RequestResult.Error<String>(it) }
+                val item = error?.let { RequestResult.Error(it) }
                     ?: link?.let { RequestResult.Success(it) }
 
                 item?.let(emitter::onNext)

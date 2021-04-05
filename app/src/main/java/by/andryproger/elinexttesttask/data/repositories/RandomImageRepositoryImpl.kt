@@ -23,7 +23,7 @@ class RandomImageRepositoryImpl(
 
                 override fun onResponse(call: Call, response: Response) {
                     if (response.isSuccessful) {
-                        onResult(response.request().url().url().toString(), null)
+                        onResult(response.request.url.toUrl().toString(), null)
                     } else {
                         onResult(null, null)
                     }

@@ -17,7 +17,7 @@ class LoadItemsUseCaseImpl(
                     RequestResult.Success(item.itemId)
                 }
                 is RequestResult.Error -> {
-                    RequestResult.Error<Long>(result.e)
+                    RequestResult.Error(result.e)
                 }
             }
         }
